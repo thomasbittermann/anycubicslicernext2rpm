@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Konfiguration
+# Configuration
 REPO_URL="https://cdn-universe-slicer.anycubic.com/prod"
-DIST_NAME="noble"  # z. B. noble (24.04), jammy (22.04)
+DIST_NAME="noble"  # i.e. noble (24.04), jammy (22.04)
 ARCH="amd64"
 COMP="main"
 PKG_URL="${REPO_URL}/dists/${DIST_NAME}/${COMP}/binary-${ARCH}/Packages"
@@ -19,7 +19,7 @@ done
 FILE_URI=$(curl -s "$PKG_URL" | grep "^Filename:" | awk '{print $2}')
 FILE_NAME=$(echo "$FILE_URI" | perl -pe 's;.*/([^/]+);$1;')
 PKG_VERSION_FILE="./usr/share/AnycubicSlicerNext/resources/build-version.txt"
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_DIR=$(dirname $(readlink -m "${BASH_SOURCE[0]}"))
 SPEC_FILE="$SCRIPT_DIR/anycubicslicernext.spec"
 
 BUILD_SOURCES="$HOME/rpmbuild/SOURCES"
@@ -71,7 +71,7 @@ if [[ -f "$TARGET_SPEC" ]]; then
         printf "Updating spec file: %s -> %s\n" "$CURRENT_SPEC_VERSION" "$PKG_VERSION"
         sed -i "s/^Version:.*/Version: $PKG_VERSION/" "$TARGET_SPEC"
         sed -i "s/^Release:.*/Release: 1/" "$TARGET_SPEC"
-        
+
         # Add changelog entry
         DATE_STR=$(LC_ALL=C date "+%a %b %d %Y")
         USER_NAME=$(git config user.name || echo "Automated Build")
@@ -79,7 +79,7 @@ if [[ -f "$TARGET_SPEC" ]]; then
         DEB_VERSION=$(echo "$FILE_NAME" | perl -pe 's/.*?-(.*)-Ubuntu.*/$1/')
         CHANGELOG_ENTRY="* $DATE_STR $USER_NAME <$USER_EMAIL> - $PKG_VERSION-1\n- Updated to version $PKG_VERSION\n- converted from $DEB_VERSION deb packages"
         sed -i "/%changelog/a $CHANGELOG_ENTRY\n" "$TARGET_SPEC"
-        
+
         # Copy the updated spec file back as the new template
         cp "$TARGET_SPEC" "$SPEC_FILE"
         printf "Updated template: %s\n" "$SPEC_FILE"
