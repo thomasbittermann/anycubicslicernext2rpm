@@ -97,6 +97,78 @@ fi
 rm -v *.gz debian-binary usr/LICENSE.txt
 mv -v usr/lib{,64}
 
+# Generate file list from extracted archive and update spec %files section
+NEW_FILES_CONTENT="%files\n%dir %{_datadir}/AnycubicSlicerNext/\n"
+
+# Function to convert filesystem path to RPM macro path
+to_rpm_path() {
+    local path="$1"
+    case "$path" in
+        usr/bin) echo "%{_bindir}" ;;
+        usr/bin/*) echo "%{_bindir}/${path#usr/bin/}" ;;
+        usr/lib64) echo "%{_libdir}" ;;
+        usr/lib64/*) echo "%{_libdir}/${path#usr/lib64/}" ;;
+        usr/include) echo "%{_includedir}" ;;
+        usr/include/*) echo "%{_includedir}/${path#usr/include/}" ;;
+        usr/share) echo "%{_datadir}" ;;
+        usr/share/*) echo "%{_datadir}/${path#usr/share/}" ;;
+        *) echo "$path" ;;
+    esac
+}
+
+# Process each directory; use glob for many files, list individually for few
+declare -A globbed_dirs
+
+while IFS= read -r dir; do
+    dir="${dir#./}"
+    [[ -z "$dir" || "$dir" == "." ]] && continue
+
+    # Skip if this directory is inside an already-globbed directory
+    skip=false
+    for globbed in "${!globbed_dirs[@]}"; do
+        if [[ "$dir" == "$globbed" || "$dir" == "$globbed"/* ]]; then
+            skip=true
+            break
+        fi
+    done
+    [[ "$skip" == true ]] && continue
+
+    rpm_dir=$(to_rpm_path "$dir")
+    file_count=$(find "$dir" -maxdepth 1 -type f 2>/dev/null | wc -l)
+
+    if [[ $file_count -gt 5 ]]; then
+        NEW_FILES_CONTENT+="$rpm_dir/*\n"
+        globbed_dirs["$dir"]=1
+        # Also list hidden files individually (globs don't match them)
+        while IFS= read -r -d '' filepath; do
+            filepath="${filepath#./}"
+            rpm_file=$(to_rpm_path "$filepath")
+            NEW_FILES_CONTENT+="$rpm_file\n"
+        done < <(find "$dir" -maxdepth 1 -type f -name '.*' -print0 | sort -z)
+    else
+        while IFS= read -r -d '' filepath; do
+            filepath="${filepath#./}"
+            rpm_file=$(to_rpm_path "$filepath")
+            NEW_FILES_CONTENT+="$rpm_file\n"
+        done < <(find "$dir" -maxdepth 1 -type f -print0 | sort -z)
+    fi
+done < <(find . -type d | sort)
+
+# Replace the %files section in the spec file
+SPEC_FILES_LINE=$(grep -n '^%files' "$TARGET_SPEC" | head -1 | cut -d: -f1)
+SPEC_CHANGELOG_LINE=$(grep -n '^%changelog' "$TARGET_SPEC" | head -1 | cut -d: -f1)
+
+if [[ -n "$SPEC_FILES_LINE" && -n "$SPEC_CHANGELOG_LINE" ]]; then
+    head -n $((SPEC_FILES_LINE - 1)) "$TARGET_SPEC" > "${TARGET_SPEC}.new"
+    printf '%b' "$NEW_FILES_CONTENT" >> "${TARGET_SPEC}.new"
+    tail -n +"$SPEC_CHANGELOG_LINE" "$TARGET_SPEC" >> "${TARGET_SPEC}.new"
+    mv "${TARGET_SPEC}.new" "$TARGET_SPEC"
+    cp "$TARGET_SPEC" "$SPEC_FILE"
+    printf "Updated %%files section in spec file.\n"
+else
+    printf "Warning: Could not find %%files or %%changelog section in spec file.\n" >&2
+fi
+
 cd ..
 SRC_DIR="anycubicslicernext-$PKG_VERSION"
 rm -rf "$SRC_DIR"
